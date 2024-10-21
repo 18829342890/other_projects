@@ -7,6 +7,12 @@
 #include <QMessageBox>
 #include <QRegularExpression>
 #include <QDateTime>
+#include <QFileDialog>
+#include <QPushButton>
+#include <QLineEdit>
+#include <QVBoxLayout>
+#include <QLabel>
+#include <QDebug>
 // #include <QtCharts>
 
 // using namespace QtCharts;
@@ -20,11 +26,18 @@ MainWindow::MainWindow(QWidget *parent)
     , seriesEnergy(new QLineSeries)
     , axisX(new QDateTimeAxis)
     , axisY(new QValueAxis)
+    , isDragging(false)
+    , dragStartX(0)
+    , dragStartMinValue(0)
+    , dragStartMaxValue(0)
 {
     ui->setupUi(this);
+
+    // 设置布局
     QChartView *chartView = new QChartView(chart);
     chartView->setRenderHint(QPainter::Antialiasing);
     chartView->viewport()->installEventFilter(this);
+    chartView->setMouseTracking(true);
 
     chart->addSeries(seriesVoltage);
     chart->addSeries(seriesCurrent);
@@ -45,14 +58,23 @@ MainWindow::MainWindow(QWidget *parent)
 
     setCentralWidget(chartView);
 
-    loadFile("energy.txt");
-    plotData();
-
+    // 连接按钮点击信号到槽函数
+    connect(ui->openFileButton, &QPushButton::clicked, this, &MainWindow::on_pushButtonLoadFile_clicked);
+    ui->toolBar->addWidget(ui->openFileButton);
 }
 
 MainWindow::~MainWindow()
 {
     delete ui;
+}
+
+void MainWindow::on_pushButtonLoadFile_clicked() {
+    QString fileName = QFileDialog::getOpenFileName(this, tr("Open File"), "", tr("Text Files (*.txt)"));
+    if (!fileName.isEmpty()) {
+        // ui->lineEditFilePath->setText(fileName); // 在文本行编辑中显示选择的文件路径
+        loadFile(fileName);
+        plotData();
+    }
 }
 
 void MainWindow::loadFile(const QString &fileName) {
@@ -112,17 +134,71 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *event) {
         QWheelEvent *wEvent = static_cast<QWheelEvent *>(event);
         wheelEvent(wEvent);
         return true;
+    } else if (event->type() == QEvent::MouseButtonPress) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
+        mousePressEvent(mouseEvent);
+        return true;
+    } else if (event->type() == QEvent::MouseMove) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
+        mouseMoveEvent(mouseEvent);
+        return true;
+    } else if (event->type() == QEvent::MouseButtonRelease) {
+        QMouseEvent *mouseEvent = static_cast<QMouseEvent *>(event);
+        mouseReleaseEvent(mouseEvent);
+        return true;
     } else {
         return QMainWindow::eventFilter(obj, event);
     }
 }
 
 void MainWindow::wheelEvent(QWheelEvent *event) {
-    if (event->angleDelta().y() > 0) {
-        // 放大
-        axisX->setRange(axisX->min().addSecs(-10), axisX->max().addSecs(10));
-    } else {
-        // 缩小
-        axisX->setRange(axisX->min().addSecs(10), axisX->max().addSecs(-10));
-    }
+    double factor = qPow(1.0015, event->angleDelta().y());
+
+    double xRange = axisX->max().toMSecsSinceEpoch() - axisX->min().toMSecsSinceEpoch();
+    double x = event->position().x() / width() * xRange + axisX->min().toMSecsSinceEpoch();
+
+    double minX = x - (x - axisX->min().toMSecsSinceEpoch()) * factor;
+    double maxX = x + (axisX->max().toMSecsSinceEpoch() - x) * factor;
+
+    axisX->setRange(QDateTime::fromMSecsSinceEpoch(minX), QDateTime::fromMSecsSinceEpoch(maxX));
 }
+
+void MainWindow::mousePressEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton) {
+        isDragging = true;
+        dragStartX = event->pos().x();
+        dragStartMinValue = axisX->min().toMSecsSinceEpoch();
+        dragStartMaxValue = axisX->max().toMSecsSinceEpoch();
+    }
+    QMainWindow::mousePressEvent(event);
+}
+
+void MainWindow::mouseMoveEvent(QMouseEvent *event) {
+    if (isDragging) {
+        int deltaX = event->pos().x() - dragStartX;
+        qint64 xRange = dragStartMaxValue - dragStartMinValue;
+        qint64 movePixelsToMs = xRange / width(); // 每像素代表的时间毫秒数
+        qint64 newMinValue = dragStartMinValue + deltaX * movePixelsToMs;
+        qint64 newMaxValue = dragStartMaxValue + deltaX * movePixelsToMs;
+
+        // 防止越界
+        if (newMinValue < seriesVoltage->at(0).x()) {
+            newMinValue = seriesVoltage->at(0).x();
+            newMaxValue = newMinValue + xRange;
+        } else if (newMaxValue > seriesVoltage->at(seriesVoltage->count() - 1).x()) {
+            newMaxValue = seriesVoltage->at(seriesVoltage->count() - 1).x();
+            newMinValue = newMaxValue - xRange;
+        }
+
+        axisX->setRange(QDateTime::fromMSecsSinceEpoch(newMinValue), QDateTime::fromMSecsSinceEpoch(newMaxValue));
+    }
+    QMainWindow::mouseMoveEvent(event);
+}
+
+void MainWindow::mouseReleaseEvent(QMouseEvent *event) {
+    if (event->button() == Qt::LeftButton) {
+        isDragging = false;
+    }
+    QMainWindow::mouseReleaseEvent(event);
+}
+

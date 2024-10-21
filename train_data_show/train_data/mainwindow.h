@@ -25,11 +25,13 @@ public:
 protected:
     bool eventFilter(QObject *obj, QEvent *event) override;
     void wheelEvent(QWheelEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
+    void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
 
 private slots:
     // 加载路径中的文件数据
-    void onLoadFileButtonClicked();
-
+    void on_pushButtonLoadFile_clicked();
 
 private:
     void loadFile(const QString& fileName);
@@ -43,5 +45,11 @@ private:
     QLineSeries *seriesEnergy;
     QDateTimeAxis *axisX;
     QValueAxis *axisY;
+    // QPointF lastMousePos;
+    bool isDragging;
+    int64_t dragStartX;
+    int64_t dragStartMinValue;
+    int64_t dragStartMaxValue;
+
 };
 #endif // MAINWINDOW_H
